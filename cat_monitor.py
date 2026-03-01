@@ -12,7 +12,7 @@ load_dotenv()
 # --- CONFIGURATION ---
 RTSP_URL = os.getenv("RTSP_URL")
 # Using the requested newest model path
-DETECTOR_MODEL = "models/yolo26s.v1/best.pt"
+DETECTOR_MODEL = "models/yolo26s.v2/best.pt"
 ESP8266_IP = os.getenv("ESP8266_IP") 
 DETECTIONS_DIR = "detections"
 
@@ -124,7 +124,9 @@ def run_monitor():
 
             if current_time - last_deterrent_time > ALERT_COOLDOWN:
                 print(f"🚨 DETERRENT TRIGGERED! (Stray seen {stray_count}/{HISTORY_WINDOW} times)")
-                # trigger_deterrent() # Uncomment to enable ESP8266 trigger
+                #Reset the stray count and history to avoid multiple triggers in a short time
+                stray_count = 0
+                #trigger_deterrent() # Uncomment to enable ESP8266 trigger
                 last_deterrent_time = current_time
 
         # --- VIDEO SAVING LOGIC ---
