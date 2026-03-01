@@ -2,7 +2,7 @@ import os
 import cv2
 import shutil
 
-# Your exact local paths
+# Paths
 BASE_DIR = "/Volumes/external-nvme256gb/cat-detector-v2/clips/dataset"
 IMAGE_DIR = os.path.join(BASE_DIR, "positives")
 LABEL_DIR = os.path.join(BASE_DIR, "labels")
@@ -10,29 +10,9 @@ TRASH_DIR = os.path.join(BASE_DIR, "trash")
 
 os.makedirs(TRASH_DIR, exist_ok=True)
 
-# 1. PRE-FILTERING
 all_images = sorted([f for f in os.listdir(IMAGE_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-valid_images = []
+valid_images = all_images # We don't pre-filter now, because we want to see potentially empty ones
 
-for img_name in all_images:
-    label_name = os.path.splitext(img_name)[0] + ".txt"
-    label_path = os.path.join(LABEL_DIR, label_name)
-    img_path = os.path.join(IMAGE_DIR, img_name)
-    
-    if os.path.exists(label_path):
-        with open(label_path, 'r') as f:
-            if f.read().strip():
-                valid_images.append(img_name)
-                continue
-    
-    # If no label or empty, move to trash
-    shutil.move(img_path, os.path.join(TRASH_DIR, img_name))
-    if os.path.exists(label_path):
-        shutil.move(label_path, os.path.join(TRASH_DIR, label_name))
-
-print(f"Starting audit for {len(valid_images)} images.")
-
-# 2. THE AUDITOR
 history = []
 i = 0
 
@@ -52,50 +32,59 @@ while i < len(valid_images):
         continue
 
     h, w, _ = img.shape
-    with open(label_path, 'r') as f:
-        lines = f.readlines()
     
-    data = lines[0].strip().split()
-    _, x_c, y_c, bw, bh = map(float, data[:5])
-    
-    # Draw box
-    x1, y1 = int((x_c - bw/2) * w), int((y_c - bh/2) * h)
-    x2, y2 = int((x_c + bw/2) * w), int((y_c + bh/2) * h)
-    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    
-    # Overlay Info
-    menu = "[1] Orange | [2] Squaky | [3] Kalaban | [4] Trash | [z] Undo"
-    cv2.putText(img, menu, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    cv2.putText(img, f"File: {img_name} ({i+1}/{len(valid_images)})", (10, h-20), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    # Check if a box exists to draw it
+    data = []
+    if os.path.exists(label_path):
+        with open(label_path, 'r') as f:
+            lines = f.readlines()
+            if lines:
+                data = lines[0].strip().split()
+                _, x_c, y_c, bw, bh = map(float, data[:5])
+                x1, y1 = int((x_c - bw/2) * w), int((y_c - bh/2) * h)
+                x2, y2 = int((x_c + bw/2) * w), int((y_c + bh/2) * h)
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2) # Red box for checking
 
-    cv2.imshow("Fast Audit", img)
+    # Menu
+    menu = "[1] Orng [2] Squak [3] Kalab | [4] TRASH | [5] NEGATIVE (Nothing here)"
+    cv2.putText(img, menu, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+    cv2.imshow("Fast Audit v2", img)
+    
     key = cv2.waitKey(0) & 0xFF
 
-    new_class = None
-    if key == ord('1'): new_class = "0" # Orange
-    elif key == ord('2'): new_class = "1" # Squaky
-    elif key == ord('3'): new_class = "2" # Kalaban
-
-    if new_class is not None:
+    if key in [ord('1'), ord('2'), ord('3')]:
+        cls = str(int(chr(key)) - 1)
         with open(label_path, 'w') as f:
-            f.write(f"{new_class} {' '.join(data[1:])}\n")
-        history.append((i, False))
-        i += 1
-    elif key == ord('4'): # Trash
-        history.append((i, True))
+            # We need coordinates to save a class. If no coords exist, we can't label it a cat.
+            if data:
+                f.write(f"{cls} {' '.join(data[1:])}\n")
+                history.append((i, "labeled"))
+                i += 1
+            else:
+                print("Cannot label as cat: No bounding box exists. Use 5 for Negative or 4 for Trash.")
+
+    elif key == ord('4'): # TRASH: Remove from dataset entirely
         shutil.move(img_path, os.path.join(TRASH_DIR, img_name))
-        shutil.move(label_path, os.path.join(TRASH_DIR, label_name))
+        if os.path.exists(label_path):
+            shutil.move(label_path, os.path.join(TRASH_DIR, label_name))
+        history.append((i, "trashed"))
         i += 1
-    elif key in [ord('z'), ord('u')]:
+
+    elif key == ord('5'): # NEGATIVE: Keep image, but empty the label
+        with open(label_path, 'w') as f:
+            f.write("") # Create an empty file
+        history.append((i, "negative"))
+        print(f"Set {img_name} as a Background sample.")
+        i += 1
+
+    elif key == ord('z'): # Basic Undo
         if history:
-            prev_i, was_trashed = history.pop()
-            if was_trashed:
-                p_name = valid_images[prev_i]
-                shutil.move(os.path.join(TRASH_DIR, p_name), os.path.join(IMAGE_DIR, p_name))
-                shutil.move(os.path.join(TRASH_DIR, os.path.splitext(p_name)[0] + ".txt"), 
-                            os.path.join(LABEL_DIR, os.path.splitext(p_name)[0] + ".txt"))
-            i = prev_i
+            idx, act = history.pop()
+            if act == "trashed":
+                # Move back
+                shutil.move(os.path.join(TRASH_DIR, valid_images[idx]), img_path)
+            i = idx
+
     elif key == ord('q'):
         break
 

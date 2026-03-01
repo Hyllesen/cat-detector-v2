@@ -2,7 +2,8 @@ import os
 from ultralytics import YOLO
 
 # 1. Load the model (YOLO26n is great for this)
-model = YOLO('yolo11n.pt') # Note: Ultralytics uses .pt for current 2026 models
+#model = YOLO('yolo26s.pt') # Note: Ultralytics uses .pt for current 2026 models
+model = YOLO('../models/yolo26s.v1/best.pt')
 
 # 2. Define your paths
 POS_DIR = "dataset/positives"
@@ -20,7 +21,7 @@ def generate_labels(directory, is_positive=True):
         
         if is_positive:
             # Predict only 'cat' (COCO class 15 is cat)
-            results = model.predict(img_path, classes=[15], conf=0.3, save_txt=False)
+            results = model.predict(img_path, classes=[0,1,2], conf=0.3, save_txt=False)
             
             with open(label_path, 'w') as f:
                 for result in results:
