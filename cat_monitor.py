@@ -57,21 +57,32 @@ def run_monitor():
     global last_deterrent_time
     cap = cv2.VideoCapture(RTSP_URL)
     
+    # Original stream dimensions
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Crop parameters from ffmpeg -vf "crop=in_w-200:in_h-220:0:220"
+    crop_x, crop_y = 0, 220
+    crop_w = frame_width - 200
+    crop_h = frame_height - 220
+    
     fps = int(cap.get(cv2.CAP_PROP_FPS)) or 20 
     
     video_writer = None
     recording_until = 0
     
     print(f"--- Garden Monitoring Active (Single Model: {DETECTOR_MODEL}) ---")
+    print(f"--- Detection Zone: {crop_w}x{crop_h} at offset ({crop_x}, {crop_y}) ---")
     
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
 
-        # Single inference pass handles both detection and identification
-        results = model(frame, verbose=False, device='mps')
+        # Create the detection slice for YOLO (matching training data perspective)
+        crop_frame = frame[crop_y : crop_y + crop_h, crop_x : crop_x + crop_w]
+
+        # Single inference pass handles both detection and identification on the CROP
+        results = model(crop_frame, verbose=False, device='mps')
         
         current_frame_identity = None
         current_frame_conf = 0.0
@@ -149,6 +160,12 @@ def run_monitor():
                 video_writer.release()
                 video_writer = None
                 print("🏁 Saved.")
+
+        # --- 3. DRAW DETECTION ZONE (WINDOW ONLY) ---
+        # Drawn after video_writer.write so it's not in the saved clip
+        cv2.rectangle(frame, (crop_x, crop_y), (crop_x + crop_w, crop_y + crop_h), (150, 150, 150), 1)
+        cv2.putText(frame, "YOLO DETECTION ZONE", (crop_x + 5, crop_y + 15), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
 
         cv2.imshow("Garden Monitor", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
