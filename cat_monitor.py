@@ -12,7 +12,7 @@ load_dotenv()
 # --- CONFIGURATION ---
 RTSP_URL = os.getenv("RTSP_URL")
 # Using the requested newest model path
-DETECTOR_MODEL = "runs/detect/cat_detector_y26n/weights/best.pt"
+DETECTOR_MODEL = "models/yolo26s.v1/best.pt"
 ESP8266_IP = os.getenv("ESP8266_IP") 
 DETECTIONS_DIR = "detections"
 
