@@ -1,0 +1,7 @@
+.venv/*
+clips/cropped_videos/*
+clips/dataset/*
+yolo_ready/*
+clips/negatives.*
+clips/positives.*
+.env

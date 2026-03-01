@@ -1,0 +1,8 @@
+path: /Volumes/external-nvme256gb/cat-detector-v2/yolo_ready
+train: train/images
+val: val/images
+
+names:
+  0: Orange
+  1: Squaky
+  2: Kalaban
