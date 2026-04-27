@@ -27,11 +27,13 @@ MODEL_PATH      = "models/detector/yolo26n.pt"
 DEVICE          = "mps" 
 
 CONF_THRESHOLD  = 0.70 
-# In your custom model, 'cat' is index 0
-CAT_CLASS_ID    = 0                            
-ABSENCE_TIMEOUT = 4.0                          
-RECONNECT_DELAY = 5                            
-CODEC           = "avc1"                       
+# Using standard COCO classes from the yolo26n model
+# COCO class ids: bird=14, cat=15
+BIRD_CLASS_ID   = 14
+CAT_CLASS_ID    = 15
+ABSENCE_TIMEOUT = 4.0
+RECONNECT_DELAY = 5
+CODEC           = "avc1"
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
@@ -56,10 +58,12 @@ def connect_stream(url: str):
     log.info("Stream opened — %dx%d @ %.1f fps", width, height, fps)
     return cap, width, height, fps
 
-def open_writer(width: int, height: int, fps: float, conf: tuple[float, float]):
+def open_writer(width: int, height: int, fps: float, info: tuple[str, float, float]):
+    # info: (label, min_conf, max_conf)
+    label, cmin, cmax = info
     timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-    conf_tag   = f"c{int(conf[0]*100)}-{int(conf[1]*100)}"
-    filepath   = OUTPUT_DIR / f"cat_{timestamp}_{conf_tag}.mp4"
+    conf_tag   = f"c{int(cmin*100)}-{int(cmax*100)}"
+    filepath   = OUTPUT_DIR / f"{label}_{timestamp}_{conf_tag}.mp4"
 
     for codec in (CODEC, "mp4v"):
         fourcc = cv2.VideoWriter_fourcc(*codec)
@@ -70,25 +74,32 @@ def open_writer(width: int, height: int, fps: float, conf: tuple[float, float]):
         writer.release()
     raise RuntimeError("No compatible video codec found")
 
-def detect_cat(results) -> Optional[tuple[float, float]]:
+def detect_animal(results) -> Optional[tuple[str, float, float]]:
     """
-    Simplified: Your custom model already ignores chickens, 
-    so we just look for Class 0 (Cat).
+    Look for COCO 'cat' or 'bird' classes and return (label, min_conf, max_conf)
     """
-    cat_confs: list[float] = []
+    confs = {"cat": [], "bird": []}
 
     for result in results:
         for box in result.boxes:
             class_id = int(box.cls)
             conf = float(box.conf)
 
-            if conf >= CONF_THRESHOLD and class_id == CAT_CLASS_ID:
-                cat_confs.append(conf)
+            if conf < CONF_THRESHOLD:
+                continue
 
-    if not cat_confs:
-        return None
+            if class_id == CAT_CLASS_ID:
+                confs["cat"].append(conf)
+            elif class_id == BIRD_CLASS_ID:
+                confs["bird"].append(conf)
 
-    return (min(cat_confs), max(cat_confs))
+    # Prefer cat over bird if both present
+    if confs["cat"]:
+        return ("cat", min(confs["cat"]), max(confs["cat"]))
+    if confs["bird"]:
+        return ("bird", min(confs["bird"]), max(confs["bird"]))
+
+    return None
 
 def main() -> None:
     if not RTSP_URL:
@@ -97,7 +108,7 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    log.info("Loading Custom Model: %s", MODEL_PATH)
+    log.info("Loading model: %s", MODEL_PATH)
     model = YOLO(MODEL_PATH)
 
     while True:
@@ -112,17 +123,18 @@ def main() -> None:
                 if not ret or frame is None:
                     break
 
-                # We only ask the model for Class 0
-                results = model(frame, device=DEVICE, classes=[0], verbose=False)
-                cat_conf = detect_cat(results)
-                cat_present = cat_conf is not None
+                # Request detections for cat and bird classes from the standard model
+                results = model(frame, device=DEVICE, classes=[BIRD_CLASS_ID, CAT_CLASS_ID], verbose=False)
+                detected = detect_animal(results)
+                animal_present = detected is not None
                 now = time.monotonic()
 
-                if cat_present:
+                if animal_present:
                     last_seen_ts = now
                     if not is_recording:
-                        log.info("Cat detected!")
-                        writer, clip_path = open_writer(width, height, fps, cat_conf)
+                        label, cmin, cmax = detected
+                        log.info("%s detected!", label.capitalize())
+                        writer, clip_path = open_writer(width, height, fps, (label, cmin, cmax))
                         is_recording = True
 
                 if is_recording:
