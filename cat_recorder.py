@@ -23,10 +23,10 @@ load_dotenv()
 RTSP_URL        = os.getenv("RTSP_URL", "")
 OUTPUT_DIR      = Path("recordings")
 # Pointing to your new best.pt from the M4 training run
-MODEL_PATH      = "models/detector/best.pt" 
+MODEL_PATH      = "models/detector/yolo26n.pt" 
 DEVICE          = "mps" 
 
-CONF_THRESHOLD  = 0.50 
+CONF_THRESHOLD  = 0.70 
 # In your custom model, 'cat' is index 0
 CAT_CLASS_ID    = 0                            
 ABSENCE_TIMEOUT = 4.0                          
