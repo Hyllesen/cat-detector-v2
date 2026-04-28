@@ -23,7 +23,7 @@ load_dotenv()
 RTSP_URL        = os.getenv("RTSP_URL", "")
 OUTPUT_DIR      = Path("recordings")
 # Pointing to your new best.pt from the M4 training run
-MODEL_PATH      = "models/detector/yolo26n.pt" 
+MODEL_PATH      = "models/detector/yolo26n_vanilla.pt" 
 DEVICE          = "mps" 
 
 CONF_THRESHOLD  = 0.70 
@@ -31,6 +31,7 @@ CONF_THRESHOLD  = 0.70
 # COCO class ids: bird=14, cat=15
 BIRD_CLASS_ID   = 14
 CAT_CLASS_ID    = 15
+MIN_DETECTION_DURATION = 1.0
 ABSENCE_TIMEOUT = 4.0
 RECONNECT_DELAY = 5
 CODEC           = "avc1"
@@ -114,6 +115,8 @@ def main() -> None:
     while True:
         cap, writer, clip_path = None, None, None
         is_recording, last_seen_ts = False, 0.0
+        pending_since: Optional[float] = None
+        pending_info: Optional[tuple[str, float, float]] = None
 
         try:
             cap, width, height, fps = connect_stream(RTSP_URL)
@@ -130,18 +133,44 @@ def main() -> None:
                 now = time.monotonic()
 
                 if animal_present:
+                    label, cmin, cmax = detected
                     last_seen_ts = now
+
+                    if pending_info is None or pending_info[0] != label:
+                        pending_since = now
+                        pending_info = (label, cmin, cmax)
+                    else:
+                        pending_label, pending_cmin, pending_cmax = pending_info
+                        pending_info = (
+                            pending_label,
+                            min(pending_cmin, cmin),
+                            max(pending_cmax, cmax),
+                        )
+
                     if not is_recording:
-                        label, cmin, cmax = detected
-                        log.info("%s detected!", label.capitalize())
-                        writer, clip_path = open_writer(width, height, fps, (label, cmin, cmax))
-                        is_recording = True
+                        assert pending_since is not None
+                        assert pending_info is not None
+
+                        if (now - pending_since) >= MIN_DETECTION_DURATION:
+                            log.info(
+                                "%s detected for %.1fs, starting recording",
+                                pending_info[0].capitalize(),
+                                MIN_DETECTION_DURATION,
+                            )
+                            writer, clip_path = open_writer(width, height, fps, pending_info)
+                            is_recording = True
+                            pending_since = None
+                            pending_info = None
+                elif not is_recording:
+                    pending_since = None
+                    pending_info = None
 
                 if is_recording:
                     writer.write(frame)
-                    if not cat_present and (now - last_seen_ts) > ABSENCE_TIMEOUT:
+                    if not animal_present and (now - last_seen_ts) > ABSENCE_TIMEOUT:
                         writer.release()
                         log.info("Recording saved → %s", clip_path.name)
+                        writer, clip_path = None, None
                         is_recording = False
 
         except KeyboardInterrupt:
